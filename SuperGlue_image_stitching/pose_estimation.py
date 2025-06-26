@@ -1834,31 +1834,18 @@ def main():
                   [0.00000000, 11113.4930, 527.296795],
                   [0.00000000, 0.00000000, 1.00000000]])
     
+    room_name = 'kidroom'
+    traj_data_dir = f'/Users/cyqpp/Work/Research/EVA Evaluating Visual Accessibility/EVA_walk_see_trace_demo/trajectories/{room_name}'
     
     # Load images
     # Load image names
-    image_paths = sorted(glob.glob('/Users/cyqpp/Work/Research/EVA Evaluating Visual Accessibility/EVA_walk_see_trace_demo/raw_data/kidroom*.png'))
+    image_paths = sorted(glob.glob(f'/Users/cyqpp/Work/Research/EVA Evaluating Visual Accessibility/EVA_walk_see_trace_demo/raw_data/{room_name}*.png'))
     image_names = [os.path.basename(image_path) for image_path in image_paths]
     images = []
     for image_path in image_paths:
         image = cv2.imread(image_path)
         images.append(image)
 
-    # Add the final frame for the trajectory
-    trajectory_frame = cv2.imread('/Users/cyqpp/Downloads/sub046_norm/sub046_norm/kidroom/pillow/frames/00081.jpg')
-    images.append(trajectory_frame)
-    image_names.append('trajectory_frame')
-
-    # Load trajectory
-    traj = np.load('/Users/cyqpp/Downloads/sub046_norm/sub046_norm/kidroom/pillow/trajectory.npz')['gt_traj']
-    
-    img_vis = trajectory_frame.copy()
-    for (x, y) in traj:
-        cv2.circle(img_vis , (int(x), int(y)), radius=5, color=(0, 255, 0), thickness=-1)
-
-    plt.imshow(cv2.cvtColor(img_vis , cv2.COLOR_BGR2RGB))
-    plt.axis('off')
-    plt.show()
     
     # Run SuperGlue
     pairs = [[0, i] for i in range(1, len(images))] # Use the first image as anchor
@@ -1880,24 +1867,58 @@ def main():
         plt.imshow(img)
         plt.show()
 
-    # Warp the traj
-    pts1, pts2 = all_mkpts[-1]
-    H, status = cv2.findHomography(pts2, pts1, cv2.RANSAC, 5.0)
-    warped_traj = cv2.perspectiveTransform(np.array(traj, dtype=np.float32).reshape(-1, 1, 2), H).reshape(-1, 2)
-    warped_traj[:, 0] += dx
-    warped_traj[:, 1] += dy
-
     combined = blend_images_with_seams(warped_images, visualize=False)
 
-    for (x, y) in warped_traj:
-        cv2.circle(combined , (int(x), int(y)), radius=5, color=(0, 255, 0), thickness=-1)
+    # Find relative poses of trajectory using the final frames
+    # ############
+    images = [images[0]]
+    image_names = [image_names[0]]
+    poses = [poses[0]]
+
+    # Add the final frames to images
+    traj_dirs = [os.path.join(traj_data_dir, dir_name) for dir_name in os.listdir(traj_data_dir)]
+    traj_dirs = [dir for dir in traj_dirs if os.path.isdir(dir)]
+
+    for traj_dir in traj_dirs:
+        final_frame_path = sorted(glob.glob(os.path.join(traj_dir, 'frames', '*.jpg')))[-1]
+        trajectory_frame = cv2.imread(final_frame_path)
+        images.append(trajectory_frame)
+        image_names.append(os.path.basename(traj_dir))
+    
+    # Find relative poses 
+    pairs = [[0, i] for i in range(1, len(images))] # Use the first image as anchor
+    all_mkpts = extract_and_match_features(images, image_names, pairs)
+
+    # Use the relative poses to warp each trajectory
+    for traj_idx, traj_dir in enumerate(traj_dirs):
+        traj_path = os.path.join(traj_dir, 'trajectory.npz')
+        # Load trajectory
+        traj = np.load(traj_path)['gt_traj']
+        
+        img_vis = images[traj_idx + 1].copy()
+        traj_color = tuple(random.randint(0, 255) for _ in range(3))
+        for (x, y) in traj:
+            cv2.circle(img_vis , (int(x), int(y)), radius=5, color=traj_color, thickness=-1)
+
+        plt.imshow(cv2.cvtColor(img_vis , cv2.COLOR_BGR2RGB))
+        plt.axis('off')
+        plt.show()
+
+        # Warp the traj
+        pts1, pts2 = all_mkpts[traj_idx]
+        H, status = cv2.findHomography(pts2, pts1, cv2.RANSAC, 5.0)
+        warped_traj = cv2.perspectiveTransform(np.array(traj, dtype=np.float32).reshape(-1, 1, 2), H).reshape(-1, 2)
+        # Translate the traj so it aligns with the combined image
+        warped_traj[:, 0] += dx
+        warped_traj[:, 1] += dy
+
+        for (x, y) in warped_traj:
+            cv2.circle(combined , (int(x), int(y)), radius=5, color=traj_color, thickness=-1)
+
     plt.imshow(cv2.cvtColor(combined , cv2.COLOR_BGR2RGB))
     plt.axis('off')
     plt.show()
-    
-
-    # blend_images_with_seams(warped_images, visualize=True)
-
+        
 
     # TEMP: Vis
     # img_transformed = arkit_images[0]
